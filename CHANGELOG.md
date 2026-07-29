@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/dermatz/arcdps_enemyCounter/compare/v1.3.0...v1.4.0) (2026-07-29)
+
+
+### Features
+
+* next version ([85b3509](https://github.com/dermatz/arcdps_enemyCounter/commit/85b3509405311a1edacc6e2879ab29e041a50035))
+
 ## [1.3.0](https://github.com/dermatz/arcdps_enemyCounter/compare/v1.2.0...v1.3.0) (2026-07-29)
 
 
