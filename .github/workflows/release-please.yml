@@ -1,6 +1,7 @@
-name: Release Please
+name: Release and Build
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -23,10 +24,11 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
-  build-release-asset:
+  build:
     needs: release-please
-    if: ${{ needs.release-please.outputs.release_created }}
     runs-on: windows-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -50,9 +52,13 @@ jobs:
           powershell -NoProfile -Command "Compress-Archive -Path 'out\arcdps_enemy_counter.dll','README.md' -DestinationPath 'arcdps_enemy_counter.zip'"
         shell: cmd
 
+      - name: Verify archive contents
+        run: powershell -NoProfile -Command "Expand-Archive -Path 'arcdps_enemy_counter.zip' -DestinationPath '_verify' -Force; Get-ChildItem '_verify' -Recurse"
+        shell: cmd
+
       - name: Upload to GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ needs.release-please.outputs.tag_name }}
-          files: arcdps_enemy_counter.zip
-          fail_on_unmatched: false
+        if: ${{ needs.release-please.outputs.release_created == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ needs.release-please.outputs.tag_name }}" arcdps_enemy_counter.zip --clobber
+        shell: cmd
