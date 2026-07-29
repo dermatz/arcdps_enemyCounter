@@ -1,0 +1,11 @@
+{
+  "packages": {
+    ".": {
+      "release-type": "simple",
+      "package-name": "arcdps-enemy-counter",
+      "changelog-path": "CHANGELOG.md",
+      "pull-request-header": "Next Release",
+      "pull-request-footer": "If you have any questions about the release, please contact the maintainers."
+    }
+  }
+}

@@ -1,0 +1,46 @@
+name: Build Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  release:
+    types: [published]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Download ImGui
+        run: setup_imgui.bat
+        shell: cmd
+
+      - name: Build DLL
+        run: build_enemy_counter.bat
+        shell: cmd
+
+      - name: Create release archive
+        run: |
+          if exist arcdps_enemy_counter rmdir /s /q arcdps_enemy_counter
+          if exist arcdps_enemy_counter.zip del /f /q arcdps_enemy_counter.zip
+          mkdir arcdps_enemy_counter
+          copy out\arcdps_enemy_counter.dll arcdps_enemy_counter\
+          copy README.md arcdps_enemy_counter\
+          powershell -NoProfile -Command "Compress-Archive -Path 'arcdps_enemy_counter' -DestinationPath 'arcdps_enemy_counter.zip' -Force"
+        shell: cmd
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: arcdps_enemy_counter.zip
+          fail_on_unmatched: false

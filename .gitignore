@@ -1,0 +1,21 @@
+# Build outputs
+out/
+*.obj
+*.lib
+*.exp
+*.dll
+*.pdb
+*.ilk
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.cache
+
+# Third-party dependency (download via setup_imgui.bat)
+imgui/
+
+# OS files
+Thumbs.db
+.DS_Store
