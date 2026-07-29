@@ -308,6 +308,22 @@ static uint32_t profession_name_to_index(const std::string& name) {
     return 0; // Unknown
 }
 
+/* Map a profession or elite specialization name to the base profession
+   color index used by arcdps. This lets e.g. "Tempest" use the elementalist
+   color instead of falling back to "Unknown". */
+static uint32_t profession_name_to_color_index(const std::string& name) {
+    if (name == "Druid" || name == "Soulbeast" || name == "Untamed") return 4;
+    if (name == "Daredevil" || name == "Deadeye" || name == "Specter") return 5;
+    if (name == "Berserker" || name == "Spellbreaker" || name == "Bladesworn") return 2;
+    if (name == "Dragonhunter" || name == "Firebrand" || name == "Willbender") return 1;
+    if (name == "Reaper" || name == "Scourge" || name == "Harbinger") return 8;
+    if (name == "Chronomancer" || name == "Mirage" || name == "Virtuoso") return 7;
+    if (name == "Scrapper" || name == "Holosmith" || name == "Mechanist") return 3;
+    if (name == "Tempest" || name == "Weaver" || name == "Catalyst") return 6;
+    if (name == "Herald" || name == "Renegade" || name == "Vindicator") return 9;
+    return profession_name_to_index(name);
+}
+
 /* ============================================================
  * Core tracking
  * ============================================================ */
@@ -362,9 +378,19 @@ static void record_fight_snapshot(uint64_t event_time) {
     snapshot.class_counts = build_class_counts();
 
     std::lock_guard<std::mutex> hlock(history_mutex);
-    fight_history.insert(fight_history.begin(), std::move(snapshot));
-    if (static_cast<int>(fight_history.size()) > history_count) {
-        fight_history.resize(history_count);
+    uint64_t timeout_ms = static_cast<uint64_t>(timeout_seconds) * 1000ULL;
+    if (!fight_history.empty() &&
+        event_time >= fight_history.front().event_time &&
+        (event_time - fight_history.front().event_time) <= timeout_ms) {
+        /* Still within the enemy timeout window: the current fight is a
+           continuation of the last recorded one, so update it in place
+           instead of creating a separate history entry. */
+        fight_history.front() = std::move(snapshot);
+    } else {
+        fight_history.insert(fight_history.begin(), std::move(snapshot));
+        if (static_cast<int>(fight_history.size()) > history_count) {
+            fight_history.resize(history_count);
+        }
     }
 }
 
@@ -513,6 +539,8 @@ static bool vk_is_modifier(UINT vk) {
            vk == VK_LWIN || vk == VK_RWIN;
 }
 
+static void toggle_windows();
+
 static UINT mod_wnd_nofilter(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     (void)hWnd;
     (void)lParam;
@@ -530,7 +558,7 @@ static UINT mod_wnd_nofilter(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     if (uMsg == WM_KEYDOWN && wParam == hotkey_vk) {
         if (!hotkey_pressed) {
             hotkey_pressed = true;
-            enabled = !enabled;
+            toggle_windows();
         }
     } else if (uMsg == WM_KEYUP && wParam == hotkey_vk) {
         hotkey_pressed = false;
@@ -539,12 +567,22 @@ static UINT mod_wnd_nofilter(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     return uMsg;
 }
 
+/* Toggle visibility of the main counter window and the history window
+   together, so the hotkey and the arcdps options checkbox open/close both. */
+static void toggle_windows() {
+    enabled = !enabled;
+    show_history_window = enabled;
+}
+
 /* arcdps calls this once for every registered window checkbox in its
    Interface -> Extension Windows list. We draw our own checkbox here so
    the window can be toggled on/off from the arcdps options. */
 static void mod_options_windows(char* windowname) {
     if (windowname && strcmp(windowname, arc_exports.out_name) == 0) {
-        ImGui::Checkbox("Visible", &enabled);
+        bool visible = enabled;
+        if (ImGui::Checkbox("Visible", &visible)) {
+            toggle_windows();
+        }
     }
 }
 
@@ -646,10 +684,19 @@ static void draw_history_window() {
                 ImGui::Text("%zu. %s - %u enemies", i + 1, time_str, snap.total_enemies);
                 ImGui::Indent();
                 for (const auto& c : snap.class_counts) {
-                    ImGui::Text("%s: %u", c.first.c_str(), c.second);
+                    if (use_prof_colors && prof_colors) {
+                        uint32_t prof_idx = profession_name_to_color_index(c.first);
+                        ImGui::TextColored(prof_colors[prof_idx], "%s: %u", c.first.c_str(), c.second);
+                    } else {
+                        ImGui::Text("%s: %u", c.first.c_str(), c.second);
+                    }
                 }
                 ImGui::Unindent();
                 ImGui::Separator();
+            }
+            if (ImGui::Button("Clear history")) {
+                std::lock_guard<std::mutex> hlock(history_mutex);
+                fight_history.clear();
             }
         }
     }
@@ -730,7 +777,7 @@ static uintptr_t mod_imgui(uint32_t not_charsel_or_loading, uint32_t hide_if_com
             } else {
                 for (const auto& c : class_counts) {
                     if (use_prof_colors && prof_colors) {
-                        uint32_t prof_idx = profession_name_to_index(c.first);
+                        uint32_t prof_idx = profession_name_to_color_index(c.first);
                         ImGui::TextColored(prof_colors[prof_idx], "%s: %u", c.first.c_str(), c.second);
                     } else {
                         ImGui::Text("%s: %u", c.first.c_str(), c.second);
