@@ -25,7 +25,7 @@ A lightweight [arcdps](https://www.deltaconnected.com/arcdps/) addon for Guild W
 
 ## Installation
 
-1. Download the latest release from the [Releases](../../releases) page.
+1. Download the `arcdps_enemy_counter.zip` from the latest release from the [Releases](../../releases) page.
 2. Extract `arcdps_enemy_counter.dll`.
 3. Copy it into your Guild Wars 2 folder:
    ```
