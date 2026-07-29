@@ -8,14 +8,51 @@ on:
 permissions:
   contents: write
   pull-requests: write
-  id-token: write
 
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
       - uses: googleapis/release-please-action@v4
+        id: release
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+  build-release-asset:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created }}
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Download ImGui
+        run: setup_imgui.bat
+        shell: cmd
+
+      - name: Build DLL
+        run: build_enemy_counter.bat
+        shell: cmd
+
+      - name: Create release archive
+        run: |
+          if exist arcdps_enemy_counter.zip del /f /q arcdps_enemy_counter.zip
+          powershell -NoProfile -Command "Compress-Archive -Path 'out\arcdps_enemy_counter.dll','README.md' -DestinationPath 'arcdps_enemy_counter.zip'"
+        shell: cmd
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.release-please.outputs.tag_name }}
+          files: arcdps_enemy_counter.zip
+          fail_on_unmatched: false
