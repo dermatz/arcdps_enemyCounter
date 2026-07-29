@@ -1,6 +1,6 @@
 # Enemy Counter - ArcDps Addon
 
-**Prowdly presents by Rage Society - German WvW Guild - Visit us on [RageSosciety.de](https://RageSosciety.de)**
+**Prowdly presents by Rage Society - German WvW Guild - Visit us on [RageSociety.de](https://ragesociety.de)**
 
 A lightweight [arcdps](https://www.deltaconnected.com/arcdps/) addon for Guild Wars 2 that counts enemy players you encounter during combat. It is designed primarily for WvW but works wherever arcdps provides combat events.
 
