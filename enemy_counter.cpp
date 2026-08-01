@@ -163,6 +163,7 @@ static UINT hotkey_vk = VK_F7;
 static bool hotkey_pressed = false;
 static bool waiting_for_hotkey = false;
 static uint64_t last_event_time = 0;
+static uint16_t local_player_team = 0;
 
 static std::mutex enemy_mutex;
 
@@ -247,6 +248,23 @@ static bool is_player_agent(const ag* agent) {
     if (agent->prof == PROFESSION_NONE) return false;
     if (agent->elite == ELITE_FLAG_NPC) return false;
     if (agent->self != 0) return false;
+    return true;
+}
+
+/* Update our cached local team ID whenever the local player appears. */
+static void update_local_team(const ag* agent) {
+    if (agent && agent->self != 0) {
+        local_player_team = agent->team;
+    }
+}
+
+/* In WvW a player is only an enemy if it has a known team and that team is
+   different from the local player's team. Friendly players, squadmates and
+   the local player itself are ignored. */
+static bool is_enemy_agent(const ag* agent) {
+    if (!agent) return false;
+    if (agent->team == 0) return false;
+    if (local_player_team != 0 && agent->team == local_player_team) return false;
     return true;
 }
 
@@ -395,7 +413,7 @@ static void record_fight_snapshot(uint64_t event_time) {
 }
 
 static void record_enemy(const ag* agent, uint64_t event_time, bool active) {
-    if (!is_player_agent(agent) || event_time == 0) return;
+    if (!is_player_agent(agent) || !is_enemy_agent(agent) || event_time == 0) return;
 
     std::lock_guard<std::mutex> lock(enemy_mutex);
     auto it = enemy_agents.find(static_cast<uint64_t>(agent->id));
@@ -445,6 +463,7 @@ static uintptr_t mod_combat(cbtevent* ev, ag* src, ag* dst, char* skillname, uin
             /* keep window available on every map for testing; later restrict to WvW if desired */
             show_window = true;
         }
+        update_local_team(dst);
         return 0;
     }
 
@@ -465,10 +484,13 @@ static uintptr_t mod_combat(cbtevent* ev, ag* src, ag* dst, char* skillname, uin
     /* Refresh timeout for already-tracked enemies on any event where they
        appear, even buffs/statechanges. This prevents them from disappearing
        while they are still involved in combat but not dealing direct damage. */
-    if (ev->iff == IFF_FOE && is_player_agent(src)) {
+    update_local_team(src);
+    update_local_team(dst);
+
+    if (is_player_agent(src) && is_enemy_agent(src)) {
         record_enemy(src, event_time, active);
     }
-    if (src && src->self != 0 && is_player_agent(dst)) {
+    if (src && src->self != 0 && is_player_agent(dst) && is_enemy_agent(dst)) {
         record_enemy(dst, event_time, active);
     }
 
