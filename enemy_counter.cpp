@@ -163,6 +163,8 @@ static UINT hotkey_vk = VK_F7;
 static bool hotkey_pressed = false;
 static bool waiting_for_hotkey = false;
 static uint64_t last_event_time = 0;
+static uint64_t last_damage_time = 0;
+static std::chrono::steady_clock::time_point last_damage_realtime;
 static uint16_t local_player_team = 0;
 
 static std::mutex enemy_mutex;
@@ -213,6 +215,20 @@ static uint64_t current_time_ms() {
             std::chrono::steady_clock::now().time_since_epoch()
         ).count()
     );
+}
+
+static bool is_damage_event(cbtevent* ev) {
+    if (!ev) return false;
+    if (ev->is_statechange != CBTS_NONE) return false;
+    return ev->value != 0 || ev->buff_dmg != 0;
+}
+
+static bool is_fight_active() {
+    if (last_damage_time == 0) return false;
+    auto now = std::chrono::steady_clock::now();
+    uint64_t elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_damage_realtime).count();
+    uint64_t timeout_ms = static_cast<uint64_t>(timeout_seconds) * 1000ULL;
+    return elapsed_ms <= timeout_ms;
 }
 
 static void log_arc(const char* str) {
@@ -360,7 +376,7 @@ static void cleanup_expired_enemies(uint64_t event_time) {
     }
 }
 
-static std::vector<std::pair<std::string, uint32_t>> build_class_counts() {
+static std::vector<std::pair<std::string, uint32_t>> build_class_counts_internal() {
     std::vector<std::pair<std::string, uint32_t>> class_counts;
     for (const auto& pair : enemy_agents) {
         const EnemyInfo& info = pair.second;
@@ -385,15 +401,17 @@ static std::vector<std::pair<std::string, uint32_t>> build_class_counts() {
     return class_counts;
 }
 
-static void record_fight_snapshot(uint64_t event_time) {
+static std::vector<std::pair<std::string, uint32_t>> build_class_counts() {
     std::lock_guard<std::mutex> lock(enemy_mutex);
-    if (enemy_agents.empty()) return;
+    return build_class_counts_internal();
+}
 
+static void record_fight_snapshot_unlocked(uint64_t event_time) {
     FightSnapshot snapshot;
     snapshot.timestamp = std::chrono::system_clock::now();
     snapshot.event_time = event_time;
     snapshot.total_enemies = static_cast<uint32_t>(enemy_agents.size());
-    snapshot.class_counts = build_class_counts();
+    snapshot.class_counts = build_class_counts_internal();
 
     std::lock_guard<std::mutex> hlock(history_mutex);
     uint64_t timeout_ms = static_cast<uint64_t>(timeout_seconds) * 1000ULL;
@@ -410,6 +428,22 @@ static void record_fight_snapshot(uint64_t event_time) {
             fight_history.resize(history_count);
         }
     }
+}
+
+static void record_fight_snapshot(uint64_t event_time) {
+    std::lock_guard<std::mutex> lock(enemy_mutex);
+    if (enemy_agents.empty()) return;
+    record_fight_snapshot_unlocked(event_time);
+}
+
+static void check_fight_end(uint64_t event_time) {
+    if (last_damage_time == 0) return;
+    if (is_fight_active()) return;
+
+    std::lock_guard<std::mutex> lock(enemy_mutex);
+    record_fight_snapshot_unlocked(event_time != 0 ? event_time : last_event_time);
+    enemy_agents.clear();
+    last_damage_time = 0;
 }
 
 static void record_enemy(const ag* agent, uint64_t event_time, bool active) {
@@ -476,6 +510,13 @@ static uintptr_t mod_combat(cbtevent* ev, ag* src, ag* dst, char* skillname, uin
         record_fight_snapshot(event_time);
     }
 
+    /* Any damage from either side keeps the current fight alive.
+       The fight ends when no damage has occurred for timeout_seconds. */
+    if (is_damage_event(ev)) {
+        last_damage_time = event_time;
+        last_damage_realtime = std::chrono::steady_clock::now();
+    }
+
     /* Determine whether this event represents an active combat action.
        Used to decide whether a *new* enemy should be added when the
        "only active combat" setting is enabled. */
@@ -487,11 +528,20 @@ static uintptr_t mod_combat(cbtevent* ev, ag* src, ag* dst, char* skillname, uin
     update_local_team(src);
     update_local_team(dst);
 
-    if (is_player_agent(src) && is_enemy_agent(src)) {
-        record_enemy(src, event_time, active);
-    }
-    if (src && src->self != 0 && is_player_agent(dst) && is_enemy_agent(dst)) {
-        record_enemy(dst, event_time, active);
+    check_fight_end(event_time);
+
+    if (is_fight_active()) {
+        /* Track enemy players on both sides of a combat event. This catches
+           enemies that damage our squad (src) as well as enemies our squad is
+           fighting (dst). Guards, NPCs and siege weapons are still filtered out
+           by is_player_agent because they either have no profession or are flagged
+           as NPCs (elite == ELITE_FLAG_NPC). */
+        if (is_player_agent(src) && is_enemy_agent(src)) {
+            record_enemy(src, event_time, active);
+        }
+        if (is_player_agent(dst) && is_enemy_agent(dst)) {
+            record_enemy(dst, event_time, active);
+        }
     }
 
     cleanup_expired_enemies(event_time);
@@ -734,28 +784,33 @@ static uintptr_t mod_imgui(uint32_t not_charsel_or_loading, uint32_t hide_if_com
     }
 
     cleanup_expired_enemies(last_event_time);
+    check_fight_end(last_event_time);
+
+    bool fight_active = is_fight_active();
 
     /* Build class breakdown under lock, then release it before calling ImGui. */
     std::vector<std::pair<std::string, uint32_t>> class_counts;
     uint32_t total = 0;
     {
         std::lock_guard<std::mutex> lock(enemy_mutex);
-        class_counts.reserve(enemy_agents.size());
-        for (const auto& pair : enemy_agents) {
-            const EnemyInfo& info = pair.second;
-            const char* name = get_profession_name(info.profession, info.elite);
-            bool found = false;
-            for (auto& c : class_counts) {
-                if (c.first == name) {
-                    c.second++;
-                    found = true;
-                    break;
+        if (fight_active) {
+            class_counts.reserve(enemy_agents.size());
+            for (const auto& pair : enemy_agents) {
+                const EnemyInfo& info = pair.second;
+                const char* name = get_profession_name(info.profession, info.elite);
+                bool found = false;
+                for (auto& c : class_counts) {
+                    if (c.first == name) {
+                        c.second++;
+                        found = true;
+                        break;
+                    }
                 }
+                if (!found) {
+                    class_counts.emplace_back(name, 1);
+                }
+                total++;
             }
-            if (!found) {
-                class_counts.emplace_back(name, 1);
-            }
-            total++;
         }
     }
 
@@ -793,7 +848,9 @@ static uintptr_t mod_imgui(uint32_t not_charsel_or_loading, uint32_t hide_if_com
             ImGui::Text("Enemy players: %u", total);
             ImGui::Separator();
         }
-        if (show_class_list) {
+        if (!fight_active) {
+            ImGui::TextDisabled("No active fight");
+        } else if (show_class_list) {
             if (class_counts.empty()) {
                 ImGui::TextDisabled("No enemies detected yet.");
             } else {
