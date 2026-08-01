@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.0](https://github.com/dermatz/arcdps_enemyCounter/compare/v1.6.0...v1.7.0) (2026-08-01)
+
+
+### Features
+
+* enhance enemy detection by incorporating local player team identification ([0960ba2](https://github.com/dermatz/arcdps_enemyCounter/commit/0960ba2dc91d7fe61a44fef0df21d60a1759cb81))
+
 ## [1.6.0](https://github.com/dermatz/arcdps_enemyCounter/compare/v1.5.0...v1.6.0) (2026-07-29)
 
 
