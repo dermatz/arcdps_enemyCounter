@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.0](https://github.com/dermatz/arcdps_enemyCounter/compare/v1.7.0...v1.8.0) (2026-08-01)
+
+
+### Features
+
+* enhance fight tracking by implementing damage event detection and snapshot recording ([35e0b19](https://github.com/dermatz/arcdps_enemyCounter/commit/35e0b19f710a58113f1f9507213695f6a5ead7e3))
+
 ## [1.7.0](https://github.com/dermatz/arcdps_enemyCounter/compare/v1.6.0...v1.7.0) (2026-08-01)
 
 
